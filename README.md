@@ -1,9 +1,10 @@
 # rustup: the Rust toolchain installer
 
-| CI           | Build Status                                             |
+| Master CI    | Build Status                                             |
 |--------------|----------------------------------------------------------|
-| Travis       | [![Travis Build Status][travis-badge]][travis-url]       |
-| AppVeyor     | [![AppVeyor Build Status][appveyor-badge]][appveyor-url] |
+| Windows      | ![Windows builds][actions-windows-master]                |
+| macOS        | ![maOS builds][actions-macos-master]                     |
+| Linux Etc    | ![Linux (etc) builds][actions-linux-master]              |
 
 *rustup* installs [The Rust Programming Language][rustlang] from the official
 release channels, enabling you to easily switch between stable, beta,
@@ -30,6 +31,7 @@ And it runs on all platforms Rust supports, including Windows.
 * [Working with custom toolchains](#working-with-custom-toolchains-and-local-builds)
 * [Working with network proxies](#working-with-network-proxies)
 * [Examples](#examples)
+* [Configuration files](#configuration-files)
 * [Environment variables](#environment-variables)
 * [Other installation methods](#other-installation-methods)
 * [Security](#security)
@@ -39,7 +41,7 @@ And it runs on all platforms Rust supports, including Windows.
 
 ## Installation
 
-Follow the instructions at https://rustup.rs. If
+Follow the instructions at <https://www.rust-lang.org/tools/install>. If
 that doesn't work for you there are [other installation
 methods](#other-installation-methods).
 
@@ -77,7 +79,12 @@ default (`rustc`, `rust-std`, `cargo`, and `rust-docs`) plus `rustfmt` and
 `clippy`. This profile will be used by `rustup` by default, and it's the one
 recommended for general use.
 * The **complete** profile includes all the components available through
-`rustup`, including `miri` and IDE integration tools (`rls` and `rust-analysis`).
+`rustup`. This should never be used, as it includes *every* component ever included
+in the metadata and thus will almost always fail. If you are looking for a way
+to install devtools such as `miri` or IDE integration tools (`rls`, `rust-analysis`),
+you should use the `default` profile and install the needed additional components
+manually, either by using `rustup component add` or by using `-c` when installing
+the toolchain.
 
 To change the `rustup` profile you can use the `rustup set profile` command. For
 example, to select the minimal profile you can use:
@@ -143,6 +150,26 @@ using the toolchain.
 
 [Environment Variables]: #environment-variables
 [cargo]: https://github.com/rust-lang/cargo
+
+#### Installing nightly
+
+When `rustup-init` installs the initial toolchain it _forces_ the installation
+and so will install the `nightly` channel regardless of whether it might be
+missing components that you want.  For example, if you want to make a fresh
+installation of `rustup` and then install `nightly` along with `clippy` or
+`miri` you will need to do this in two phases.
+
+Firstly install `rustup` by means of:
+
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -- --default-toolchain none -y
+
+Next you can install `nightly` allowing `rustup` to downgrade until it finds
+the components you need:
+
+    rustup toolchain install nightly --allow-downgrade --profile minimal --component clippy
+
+This can be used to great effect in CI, to get you a toolchain rapidly which meets
+your criteria
 
 ## How rustup works
 
@@ -307,7 +334,7 @@ Standard release channel toolchain names have the following form:
 ```
 
 'channel' is either a named release channel or an explicit version
-number, such as '1.8.0'. Channel names can be optionally appended with
+number, such as '1.42.0'. Channel names can be optionally appended with
 an archive date, as in 'nightly-2014-12-18', in which case the
 toolchain is downloaded from the archive for that date.
 
@@ -416,7 +443,7 @@ platforms The Rust Project publishes binary releases of the standard
 library, and for some the full compiler. `rustup` gives easy access
 to all of them.
 
-[p]: https://forge.rust-lang.org/platform-support.html
+[p]: https://forge.rust-lang.org/release/platform-support.html
 
 When you first install a toolchain, `rustup` installs only the
 standard library for your *host* platform - that is, the architecture
@@ -633,6 +660,17 @@ Command                                                     | Description
 `rustup toolchain help`                                     | Show the `help` page for a subcommand (like `toolchain`)
 `rustup man cargo`                                          | \(*Unix only*\) View the man page for a given command (like `cargo`)
 
+## Configuration files
+
+Rustup has a settings file in [TOML](https://github.com/toml-lang/toml) format
+at `${RUSTUP_HOME}/settings.toml`. The schema for this file is not part of the
+public interface for rustup - the rustup CLI should be used to query and set
+settings.
+
+On Unix operating systems a fallback settings file is consulted for some
+settings. This fallback file is located at `/etc/rustup/settings.toml` and
+currently can define only `default_toolchain`.
+
 ## Environment variables
 
 
@@ -756,11 +794,11 @@ variable.
 
 ## Security
 
-`rustup` is secure enough for the non-paranoid, but it [still needs
+`rustup` is secure enough for most people, but it [still needs
 work][s]. `rustup` performs all downloads over HTTPS, but does not
 yet validate signatures of downloads.
 
-[s]: https://github.com/rust-lang/rustup.rs/issues?q=is%3Aopen+is%3Aissue+label%3Asecurity
+[s]: https://github.com/rust-lang/rustup/issues?q=is%3Aopen+is%3Aissue+label%3Asecurity
 
 File modes on installation honor umask as of 1.18.4, use umask if
 very tight controls are desired.
@@ -811,7 +849,6 @@ Licensed under either of
 at your option.
 
 <!-- Badges -->
-[travis-url]: https://travis-ci.com/rust-lang/rustup
-[travis-badge]: https://travis-ci.com/rust-lang/rustup.svg
-[appveyor-url]: https://ci.appveyor.com/project/rust-lang-libs/rustup
-[appveyor-badge]: https://ci.appveyor.com/api/projects/status/github/rust-lang/rustup?svg=true
+[actions-windows-master]: https://github.com/rust-lang/rustup/workflows/Windows%20(master)/badge.svg
+[actions-macos-master]: https://github.com/rust-lang/rustup/workflows/macOS/badge.svg?branch=master
+[actions-linux-master]: https://github.com/rust-lang/rustup/workflows/Linux%20(master)/badge.svg

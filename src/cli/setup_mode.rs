@@ -67,7 +67,8 @@ pub fn main() -> Result<()> {
                 .long("component")
                 .short("c")
                 .takes_value(true)
-                .multiple(true),
+                .multiple(true)
+                .use_delimiter(true),
         )
         .arg(
             Arg::with_name("targets")
@@ -75,7 +76,8 @@ pub fn main() -> Result<()> {
                 .long("target")
                 .short("target")
                 .takes_value(true)
-                .multiple(true),
+                .multiple(true)
+                .use_delimiter(true),
         )
         .arg(
             Arg::with_name("no-modify-path")
@@ -88,7 +90,7 @@ pub fn main() -> Result<()> {
     let verbose = matches.is_present("verbose");
     let quiet = matches.is_present("quiet");
     let default_host = matches.value_of("default-host").map(ToOwned::to_owned);
-    let default_toolchain = matches.value_of("default-toolchain").unwrap_or("stable");
+    let default_toolchain = matches.value_of("default-toolchain").map(ToOwned::to_owned);
     let profile = matches
         .value_of("profile")
         .expect("Unreachable: Clap should supply a default");
@@ -106,7 +108,7 @@ pub fn main() -> Result<()> {
 
     let opts = InstallOpts {
         default_host_triple: default_host,
-        default_toolchain: default_toolchain.to_owned(),
+        default_toolchain,
         profile: profile.to_owned(),
         no_modify_path,
         components: &components,

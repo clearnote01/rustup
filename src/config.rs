@@ -9,11 +9,13 @@ use std::sync::Arc;
 
 use pgp::{Deserializable, SignedPublicKey};
 
+use crate::dist::download::DownloadCfg;
 use crate::dist::{dist, temp};
 use crate::errors::*;
+use crate::fallback_settings::FallbackSettings;
 use crate::notifications::*;
 use crate::settings::{Settings, SettingsFile, DEFAULT_METADATA_VERSION};
-use crate::toolchain::{Toolchain, UpdateStatus};
+use crate::toolchain::{DistributableToolchain, Toolchain, UpdateStatus};
 use crate::utils::utils;
 
 #[derive(Debug)]
@@ -108,10 +110,13 @@ impl Display for PgpPublicKey {
     }
 }
 
+pub const UNIX_FALLBACK_SETTINGS: &str = "/etc/rustup/settings.toml";
+
 pub struct Cfg {
     pub profile_override: Option<dist::Profile>,
     pub rustup_dir: PathBuf,
     pub settings_file: SettingsFile,
+    pub fallback_settings: Option<FallbackSettings>,
     pub toolchains_dir: PathBuf,
     pub update_hash_dir: PathBuf,
     pub download_dir: PathBuf,
@@ -132,6 +137,13 @@ impl Cfg {
         utils::ensure_dir_exists("home", &rustup_dir, notify_handler.as_ref())?;
 
         let settings_file = SettingsFile::new(rustup_dir.join("settings.toml"));
+
+        // Centralised file for multi-user systems to provide admin/distributor set initial values.
+        let fallback_settings = if cfg!(not(windows)) {
+            FallbackSettings::new(PathBuf::from(UNIX_FALLBACK_SETTINGS))?
+        } else {
+            None
+        };
 
         let toolchains_dir = rustup_dir.join("toolchains");
         let update_hash_dir = rustup_dir.join("update-hashes");
@@ -191,6 +203,7 @@ impl Cfg {
             profile_override: None,
             rustup_dir,
             settings_file,
+            fallback_settings,
             toolchains_dir,
             update_hash_dir,
             download_dir,
@@ -210,6 +223,20 @@ impl Cfg {
             .map_err(|e| format!("Unable parse configuration: {}", e))?;
 
         Ok(cfg)
+    }
+
+    /// construct a download configuration
+    pub fn download_cfg<'a>(
+        &'a self,
+        notify_handler: &'a dyn Fn(crate::dist::Notification<'_>),
+    ) -> DownloadCfg<'a> {
+        DownloadCfg {
+            dist_root: &self.dist_root_url,
+            temp_cfg: &self.temp_cfg,
+            download_dir: &self.download_dir,
+            notify_handler,
+            pgp_keys: self.get_pgp_keys(),
+        }
     }
 
     pub fn get_pgp_keys(&self) -> &[PgpPublicKey] {
@@ -309,11 +336,8 @@ impl Cfg {
     }
 
     pub fn which_binary(&self, path: &Path, binary: &str) -> Result<Option<PathBuf>> {
-        if let Some((toolchain, _)) = self.find_override_toolchain_or_default(path)? {
-            Ok(Some(toolchain.binary_file(binary)))
-        } else {
-            Ok(None)
-        }
+        let (toolchain, _) = self.find_or_install_override_toolchain_or_default(path)?;
+        Ok(Some(toolchain.binary_file(binary)))
     }
 
     pub fn upgrade_data(&self) -> Result<()> {
@@ -365,15 +389,10 @@ impl Cfg {
     }
 
     pub fn find_default(&self) -> Result<Option<Toolchain<'_>>> {
-        let opt_name = self
-            .settings_file
-            .with(|s| Ok(s.default_toolchain.clone()))?;
+        let opt_name = self.get_default()?;
 
         if let Some(name) = opt_name {
-            let toolchain = self
-                .verify_toolchain(&name)
-                .chain_err(|| ErrorKind::ToolchainNotInstalled(name.to_string()))?;
-
+            let toolchain = Toolchain::from(self, &name)?;
             Ok(Some(toolchain))
         } else {
             Ok(None)
@@ -427,24 +446,18 @@ impl Cfg {
                 ),
             };
 
-            match self.get_toolchain(&name, false) {
-                Ok(toolchain) => {
-                    if toolchain.exists() {
-                        Ok(Some((toolchain, reason)))
-                    } else if toolchain.is_custom() {
-                        // Strip the confusing NotADirectory error and only mention that the
-                        // override toolchain is not installed.
-                        Err(Error::from(reason_err)).chain_err(|| {
-                            ErrorKind::OverrideToolchainNotInstalled(name.to_string())
-                        })
-                    } else {
-                        toolchain.install_from_dist(true, false, &[], &[])?;
-                        Ok(Some((toolchain, reason)))
-                    }
-                }
-                Err(e) => Err(e)
-                    .chain_err(|| Error::from(reason_err))
-                    .chain_err(|| ErrorKind::OverrideToolchainNotInstalled(name.to_string())),
+            let toolchain = Toolchain::from(self, &name)?;
+            // Overridden toolchains can be literally any string, but only
+            // distributable toolchains will be auto-installed by the wrapping
+            // code; provide a nice error for this common case. (default could
+            // be set badly too, but that is much less common).
+            if !toolchain.exists() && toolchain.is_custom() {
+                // Strip the confusing NotADirectory error and only mention that the
+                // override toolchain is not installed.
+                Err(Error::from(reason_err))
+                    .chain_err(|| ErrorKind::OverrideToolchainNotInstalled(name.to_string()))
+            } else {
+                Ok(Some((toolchain, reason)))
             }
         } else {
             Ok(None)
@@ -495,21 +508,42 @@ impl Cfg {
         Ok(None)
     }
 
-    pub fn find_override_toolchain_or_default(
+    pub fn find_or_install_override_toolchain_or_default(
         &self,
         path: &Path,
-    ) -> Result<Option<(Toolchain<'_>, Option<OverrideReason>)>> {
-        Ok(
+    ) -> Result<(Toolchain<'_>, Option<OverrideReason>)> {
+        if let Some((toolchain, reason)) =
             if let Some((toolchain, reason)) = self.find_override(path)? {
                 Some((toolchain, Some(reason)))
             } else {
                 self.find_default()?.map(|toolchain| (toolchain, None))
-            },
-        )
+            }
+        {
+            if !toolchain.exists() {
+                if toolchain.is_custom() {
+                    return Err(
+                        ErrorKind::ToolchainNotInstalled(toolchain.name().to_string()).into(),
+                    );
+                }
+                let distributable = DistributableToolchain::new(&toolchain)?;
+                distributable.install_from_dist(true, false, &[], &[])?;
+            }
+            Ok((toolchain, reason))
+        } else {
+            // No override and no default set
+            Err(ErrorKind::ToolchainNotSelected.into())
+        }
     }
 
     pub fn get_default(&self) -> Result<Option<String>> {
-        self.settings_file.with(|s| Ok(s.default_toolchain.clone()))
+        let user_opt = self.settings_file.with(|s| Ok(s.default_toolchain.clone()));
+        if let Some(fallback_settings) = &self.fallback_settings {
+            match user_opt {
+                Err(_) | Ok(None) => return Ok(fallback_settings.default_toolchain.clone()),
+                _ => {}
+            };
+        };
+        user_opt
     }
 
     pub fn list_toolchains(&self) -> Result<Vec<String>> {
@@ -550,15 +584,16 @@ impl Cfg {
 
         // Update toolchains and collect the results
         let channels = channels.map(|(n, t)| {
-            let t = t.and_then(|t| {
-                let t = t.install_from_dist(force_update, false, &[], &[]);
-                if let Err(ref e) = t {
+            let st = t.and_then(|t| {
+                let distributable = DistributableToolchain::new(&t)?;
+                let st = distributable.install_from_dist(force_update, false, &[], &[]);
+                if let Err(ref e) = st {
                     (self.notify_handler)(Notification::NonFatalError(e));
                 }
-                t
+                st
             });
 
-            (n, t)
+            (n, st)
         });
 
         Ok(channels.collect())
@@ -581,8 +616,7 @@ impl Cfg {
         &self,
         path: &Path,
     ) -> Result<(Toolchain<'_>, Option<OverrideReason>)> {
-        self.find_override_toolchain_or_default(path)
-            .and_then(|r| r.ok_or_else(|| "no default toolchain configured".into()))
+        self.find_or_install_override_toolchain_or_default(path)
     }
 
     pub fn create_command_for_dir(&self, path: &Path, binary: &str) -> Result<Command> {
@@ -591,7 +625,10 @@ impl Cfg {
         if let Some(cmd) = self.maybe_do_cargo_fallback(toolchain, binary)? {
             Ok(cmd)
         } else {
-            toolchain.create_command(binary)
+            // NB this can only fail in race conditions since we used toolchain
+            // for dir.
+            let installed = toolchain.as_installed_common()?;
+            installed.create_command(binary)
         }
     }
 
@@ -603,13 +640,16 @@ impl Cfg {
     ) -> Result<Command> {
         let toolchain = self.get_toolchain(toolchain, false)?;
         if install_if_missing && !toolchain.exists() {
-            toolchain.install_from_dist(true, false, &[], &[])?;
+            let distributable = DistributableToolchain::new(&toolchain)?;
+            distributable.install_from_dist(true, false, &[], &[])?;
         }
 
         if let Some(cmd) = self.maybe_do_cargo_fallback(&toolchain, binary)? {
             Ok(cmd)
         } else {
-            toolchain.create_command(binary)
+            // NB note this really can't fail due to to having installed the toolchain if needed
+            let installed = toolchain.as_installed_common()?;
+            installed.create_command(binary)
         }
     }
 
@@ -635,10 +675,12 @@ impl Cfg {
             return Ok(None);
         }
 
+        // XXX: This could actually consider all distributable toolchains in principle.
         for fallback in &["nightly", "beta", "stable"] {
             let fallback = self.get_toolchain(fallback, false)?;
             if fallback.exists() {
-                let cmd = fallback.create_fallback_command("cargo", toolchain)?;
+                let distributable = DistributableToolchain::new(&fallback)?;
+                let cmd = distributable.create_fallback_command("cargo", toolchain)?;
                 return Ok(Some(cmd));
             }
         }
@@ -666,7 +708,7 @@ impl Cfg {
                     .as_ref()
                     .map(|s| dist::TargetTriple::new(&s)))
             })?
-            .unwrap_or_else(dist::TargetTriple::from_build))
+            .unwrap_or_else(dist::TargetTriple::from_host_or_build))
     }
 
     pub fn resolve_toolchain(&self, name: &str) -> Result<String> {

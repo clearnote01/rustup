@@ -56,6 +56,7 @@ info: removing previous version of component 'rust-docs'
 info: removing previous version of component 'rust-std'
 info: removing previous version of component 'rustc'
 info: installing component 'cargo'
+info: Defaulting to 500.0 MiB unpack ram
 info: installing component 'rust-docs'
 info: installing component 'rust-std'
 info: installing component 'rustc'
@@ -96,6 +97,7 @@ info: removing previous version of component 'rust-docs'
 info: removing previous version of component 'rust-std'
 info: removing previous version of component 'rustc'
 info: installing component 'cargo'
+info: Defaulting to 500.0 MiB unpack ram
 info: installing component 'rust-docs'
 info: installing component 'rust-std'
 info: installing component 'rustc'
@@ -160,6 +162,7 @@ info: removing previous version of component 'rust-docs'
 info: removing previous version of component 'rust-std'
 info: removing previous version of component 'rustc'
 info: installing component 'cargo'
+info: Defaulting to 500.0 MiB unpack ram
 info: installing component 'rust-docs'
 info: installing component 'rust-std'
 info: installing component 'rustc'
@@ -230,6 +233,7 @@ info: removing previous version of component 'rust-docs'
 info: removing previous version of component 'rust-std'
 info: removing previous version of component 'rustc'
 info: installing component 'cargo'
+info: Defaulting to 500.0 MiB unpack ram
 info: installing component 'rust-docs'
 info: installing component 'rust-std'
 info: installing component 'rustc'
@@ -291,6 +295,7 @@ info: downloading component 'rust-docs'
 info: downloading component 'rust-std'
 info: downloading component 'rustc'
 info: installing component 'cargo'
+info: Defaulting to 500.0 MiB unpack ram
 info: installing component 'rust-docs'
 info: installing component 'rust-std'
 info: installing component 'rustc'
@@ -1651,6 +1656,17 @@ fn docs_missing() {
             &["rustup", "doc"],
             "error: unable to view documentation which is not installed",
         );
+    });
+}
+
+#[test]
+fn docs_custom() {
+    setup(&|config| {
+        let path = config.customdir.join("custom-1");
+        let path = path.to_string_lossy();
+        expect_ok(config, &["rustup", "toolchain", "link", "custom", &path]);
+        expect_ok(config, &["rustup", "default", "custom"]);
+        expect_stdout_ok(config, &["rustup", "doc", "--path"], "custom");
     });
 }
 

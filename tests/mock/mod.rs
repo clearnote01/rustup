@@ -4,30 +4,32 @@ pub mod clitools;
 pub mod dist;
 pub mod topical_doc_data;
 
+#[cfg(windows)]
+use rustup::utils::utils;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
 // Mock of the on-disk structure of rust-installer installers
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct MockInstallerBuilder {
     pub components: Vec<MockComponentBuilder>,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct MockComponentBuilder {
     pub name: String,
     pub files: Vec<MockFile>,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct MockFile {
     path: String,
     contents: Contents,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 enum Contents {
     File(MockContents),
     Dir(Vec<(&'static str, MockContents)>),
@@ -37,6 +39,15 @@ enum Contents {
 struct MockContents {
     contents: Arc<Vec<u8>>,
     executable: bool,
+}
+
+impl std::fmt::Debug for MockContents {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("MockContents")
+            .field("content_len", &self.contents.len())
+            .field("executable", &self.executable)
+            .finish()
+    }
 }
 
 impl MockInstallerBuilder {
@@ -184,24 +195,12 @@ pub fn restore_path(p: Option<String>) {
 
     if let Some(p) = p.as_ref() {
         let reg_value = RegValue {
-            bytes: string_to_winreg_bytes(&p),
+            bytes: utils::string_to_winreg_bytes(&p),
             vtype: RegType::REG_EXPAND_SZ,
         };
         environment.set_raw_value("PATH", &reg_value).unwrap();
     } else {
         let _ = environment.delete_value("PATH");
-    }
-
-    fn string_to_winreg_bytes(s: &str) -> Vec<u8> {
-        use std::ffi::OsStr;
-        use std::os::windows::ffi::OsStrExt;
-        let v: Vec<u16> = OsStr::new(s)
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-        let ptr = v.as_ptr().cast::<u8>();
-        let len = v.len() * 2;
-        unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec()
     }
 }
 

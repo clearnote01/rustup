@@ -506,8 +506,9 @@ pub fn format_path_for_display(path: &str) -> String {
 /// Encodes a utf-8 string as a null-terminated UCS-2 string in bytes
 #[cfg(windows)]
 pub fn string_to_winreg_bytes(s: &str) -> Vec<u8> {
+    use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
-    let v: Vec<_> = OsString::from(format!("{}\x00", s)).encode_wide().collect();
+    let v: Vec<u16> = OsStr::new(s).encode_wide().chain(Some(0)).collect();
     unsafe { std::slice::from_raw_parts(v.as_ptr().cast::<u8>(), v.len() * 2).to_vec() }
 }
 
@@ -581,7 +582,7 @@ fn rename<'a, N>(
 where
     N: From<Notification<'a>>,
 {
-    // https://github.com/rust-lang/rustup.rs/issues/1870
+    // https://github.com/rust-lang/rustup/issues/1870
     // 21 fib steps from 1 sums to ~28 seconds, hopefully more than enough
     // for our previous poor performance that avoided the race condition with
     // McAfee and Norton.
@@ -607,13 +608,10 @@ where
 
 pub fn delete_dir_contents(dir_path: &Path) {
     match remove_dir_all::remove_dir_all(dir_path) {
-        Ok(_) => {}
-        Err(e) => match e.kind() {
-            io::ErrorKind::NotFound => {
-                // Nothing to do here
-            }
-            _ => panic!("Unable to clean up {}: {:?}", dir_path.display(), e),
-        },
+        Err(e) if e.kind() != io::ErrorKind::NotFound => {
+            panic!("Unable to clean up {}: {:?}", dir_path.display(), e);
+        }
+        _ => {}
     }
 }
 
@@ -666,6 +664,39 @@ impl<'a> io::Read for FileReaderWithProgress<'a> {
                 Ok(nbytes)
             }
             Err(e) => Err(e),
+        }
+    }
+}
+
+// search user database to get home dir of euid user
+#[cfg(unix)]
+pub fn home_dir_from_passwd() -> Option<PathBuf> {
+    use std::ffi::CStr;
+    use std::mem::MaybeUninit;
+    use std::os::unix::ffi::OsStringExt;
+    use std::ptr;
+    unsafe {
+        let init_size = match libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX) {
+            -1 => 1024,
+            n => n as usize,
+        };
+        let mut buf = Vec::with_capacity(init_size);
+        let mut pwd: MaybeUninit<libc::passwd> = MaybeUninit::uninit();
+        let mut pwdp = ptr::null_mut();
+        match libc::getpwuid_r(
+            libc::geteuid(),
+            pwd.as_mut_ptr(),
+            buf.as_mut_ptr(),
+            buf.capacity(),
+            &mut pwdp,
+        ) {
+            0 if !pwdp.is_null() => {
+                let pwd = pwd.assume_init();
+                let bytes = CStr::from_ptr(pwd.pw_dir).to_bytes().to_vec();
+                let pw_dir = OsString::from_vec(bytes);
+                Some(PathBuf::from(pw_dir))
+            }
+            _ => None,
         }
     }
 }

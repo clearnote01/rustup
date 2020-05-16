@@ -1,4 +1,5 @@
 #![allow(clippy::large_enum_variant)]
+#![allow(deprecated)] // because of `Error::description` deprecation in `error_chain`
 
 use crate::component_for_bin;
 use crate::dist::dist::Profile;
@@ -28,6 +29,7 @@ error_chain! {
         Io(io::Error);
         Open(opener::OpenError);
         Thread(std::sync::mpsc::RecvError);
+        Limits(effective_limits::Error);
     }
 
     errors {
@@ -187,10 +189,6 @@ error_chain! {
             description("invalid toolchain name")
             display("invalid toolchain name: '{}'", t)
         }
-        InvalidCustomToolchainName(t: String) {
-            description("invalid custom toolchain name")
-            display("invalid custom toolchain name: '{}'", t)
-        }
         InvalidProfile(t: String) {
             description("invalid profile name")
             display("invalid profile name: '{}'; valid names are: {}", t, valid_profile_names())
@@ -298,6 +296,10 @@ error_chain! {
             description("toolchain is not installed")
             display("toolchain '{}' is not installed", t)
         }
+        ToolchainNotSelected {
+            description("toolchain is not selected")
+            display("no override and no default toolchain set")
+        }
         OverrideToolchainNotInstalled(t: String) {
             description("override toolchain is not installed")
             display("override toolchain '{}' is not installed", t)
@@ -340,6 +342,9 @@ error_chain! {
             description("required component cannot be added")
             display("component {} was automatically added because it is required for toolchain '{}'",
                     c, t)
+        }
+        ParsingFallbackSettings(e: toml::de::Error) {
+            description("error parsing settings")
         }
         ParsingSettings(e: toml::de::Error) {
             description("error parsing settings")

@@ -3,11 +3,13 @@
 pub mod mock;
 
 use crate::mock::clitools::{
-    self, expect_stderr_ok, expect_stdout_ok, set_current_dist_date, Config, SanitizedOutput,
-    Scenario,
+    self, expect_ok, expect_stderr_ok, expect_stdout_ok, set_current_dist_date, this_host_triple,
+    Config, SanitizedOutput, Scenario,
 };
 use crate::mock::{get_path, restore_path};
 use lazy_static::lazy_static;
+use rustup::utils::raw;
+use std::fs;
 use std::io::Write;
 use std::process::Stdio;
 use std::sync::Mutex;
@@ -39,8 +41,21 @@ pub fn setup(f: &dyn Fn(&Config)) {
 }
 
 fn run_input(config: &Config, args: &[&str], input: &str) -> SanitizedOutput {
+    run_input_with_env(config, args, input, &[])
+}
+
+fn run_input_with_env(
+    config: &Config,
+    args: &[&str],
+    input: &str,
+    env: &[(&str, &str)],
+) -> SanitizedOutput {
     let mut cmd = clitools::cmd(config, args[0], &args[1..]);
     clitools::env(config, &mut cmd);
+
+    for (key, value) in env.iter() {
+        cmd.env(key, value);
+    }
 
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::piped());
@@ -234,6 +249,31 @@ fn user_says_nope_after_advanced_install() {
 }
 
 #[test]
+fn install_with_components() {
+    fn go(comp_args: &[&str]) {
+        let mut args = vec!["rustup-init", "-y"];
+        args.extend_from_slice(comp_args);
+
+        setup(&|config| {
+            expect_ok(config, &args);
+            expect_stdout_ok(
+                config,
+                &["rustup", "component", "list"],
+                "rust-src (installed)",
+            );
+            expect_stdout_ok(
+                config,
+                &["rustup", "component", "list"],
+                &format!("rust-analysis-{} (installed)", this_host_triple()),
+            );
+        })
+    }
+
+    go(&["-c", "rust-src", "-c", "rust-analysis"]);
+    go(&["-c", "rust-src,rust-analysis"]);
+}
+
+#[test]
 fn install_forces_and_skips_rls() {
     setup_(true, &|config| {
         set_current_dist_date(config, "2015-01-01");
@@ -265,4 +305,105 @@ fn test_warn_if_complete_profile_is_used() {
             "warning: downloading with complete profile",
         );
     });
+}
+
+fn create_rustup_sh_metadata(config: &Config) {
+    let rustup_dir = config.homedir.join(".rustup");
+    fs::create_dir_all(&rustup_dir).unwrap();
+    let version_file = rustup_dir.join("rustup-version");
+    raw::write_file(&version_file, "").unwrap();
+}
+
+#[test]
+fn test_prompt_fail_if_rustup_sh_already_installed_reply_nothing() {
+    setup(&|config| {
+        create_rustup_sh_metadata(&config);
+        let out = run_input(config, &["rustup-init"], "\n");
+        assert!(!out.ok);
+        assert!(out
+            .stderr
+            .contains("warning: it looks like you have existing rustup.sh metadata"));
+        assert!(out
+            .stderr
+            .contains("error: cannot install while rustup.sh is installed"));
+        assert!(out.stdout.contains("Continue? (y/N)"));
+    })
+}
+
+#[test]
+fn test_prompt_fail_if_rustup_sh_already_installed_reply_no() {
+    setup(&|config| {
+        create_rustup_sh_metadata(&config);
+        let out = run_input(config, &["rustup-init"], "no\n");
+        assert!(!out.ok);
+        assert!(out
+            .stderr
+            .contains("warning: it looks like you have existing rustup.sh metadata"));
+        assert!(out
+            .stderr
+            .contains("error: cannot install while rustup.sh is installed"));
+        assert!(out.stdout.contains("Continue? (y/N)"));
+    })
+}
+
+#[test]
+fn test_prompt_succeed_if_rustup_sh_already_installed_reply_yes() {
+    setup(&|config| {
+        create_rustup_sh_metadata(&config);
+        let out = run_input(config, &["rustup-init"], "yes\n\n\n");
+        assert!(out.ok);
+        assert!(out
+            .stderr
+            .contains("warning: it looks like you have existing rustup.sh metadata"));
+        assert!(out
+            .stderr
+            .contains("error: cannot install while rustup.sh is installed"));
+        assert!(out.stdout.contains("Continue? (y/N)"));
+        assert!(!out.stdout.contains(
+            "warning: continuing (because the -y flag is set and the error is ignorable)"
+        ))
+    })
+}
+
+#[test]
+fn test_warn_succeed_if_rustup_sh_already_installed_y_flag() {
+    setup(&|config| {
+        create_rustup_sh_metadata(&config);
+        let out = run_input(config, &["rustup-init", "-y"], "");
+        assert!(out.ok);
+        assert!(out
+            .stderr
+            .contains("warning: it looks like you have existing rustup.sh metadata"));
+        assert!(out
+            .stderr
+            .contains("error: cannot install while rustup.sh is installed"));
+        assert!(out.stderr.contains(
+            "warning: continuing (because the -y flag is set and the error is ignorable)"
+        ));
+        assert!(!out.stdout.contains("Continue? (y/N)"));
+    })
+}
+
+#[test]
+fn test_succeed_if_rustup_sh_already_installed_env_var_set() {
+    setup(&|config| {
+        create_rustup_sh_metadata(&config);
+        let out = run_input_with_env(
+            config,
+            &["rustup-init", "-y"],
+            "",
+            &[("RUSTUP_INIT_SKIP_EXISTENCE_CHECKS", "yes")],
+        );
+        assert!(out.ok);
+        assert!(!out
+            .stderr
+            .contains("warning: it looks like you have existing rustup.sh metadata"));
+        assert!(!out
+            .stderr
+            .contains("error: cannot install while rustup.sh is installed"));
+        assert!(!out.stderr.contains(
+            "warning: continuing (because the -y flag is set and the error is ignorable)"
+        ));
+        assert!(!out.stdout.contains("Continue? (y/N)"));
+    })
 }

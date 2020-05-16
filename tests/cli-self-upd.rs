@@ -565,17 +565,23 @@ fn install_doesnt_modify_path_if_passed_no_modify_path() {
 #[test]
 fn update_exact() {
     let version = env!("CARGO_PKG_VERSION");
-    let expected_output = &(r"info: checking for self-updates
+    let expected_output = format!(
+        "info: checking for self-updates
 info: downloading self-update
-info: rustup updated successfully to "
-        .to_owned()
-        + version
-        + "
-");
+"
+    );
 
     update_setup(&|config, _| {
         expect_ok(config, &["rustup-init", "-y"]);
-        expect_ok_ex(config, &["rustup", "self", "update"], r"", expected_output)
+        expect_ok_ex(
+            config,
+            &["rustup", "self", "update"],
+            &format!(
+                "  rustup updated - (toolchain not installed) (from {})\n\n",
+                version,
+            ),
+            &expected_output,
+        )
     });
 }
 
@@ -697,7 +703,9 @@ fn update_no_change() {
         expect_ok_ex(
             config,
             &["rustup", "self", "update"],
-            r"",
+            r"  rustup unchanged - (toolchain not installed)
+
+",
             r"info: checking for self-updates
 ",
         );
@@ -875,6 +883,7 @@ info: downloading component 'rust-docs'
 info: downloading component 'rust-std'
 info: downloading component 'rustc'
 info: installing component 'cargo'
+info: Defaulting to 500.0 MiB unpack ram
 info: installing component 'rust-docs'
 info: installing component 'rust-std'
 info: installing component 'rustc'
@@ -892,8 +901,43 @@ fn reinstall_exact() {
         expect_stderr_ok(
             config,
             &["rustup-init", "-y"],
-            r"info: updating existing rustup installation
-",
+            r"info: updating existing rustup installation - leaving toolchains alone",
+        );
+    });
+}
+
+#[test]
+fn reinstall_specifying_toolchain() {
+    setup(&|config| {
+        expect_ok(config, &["rustup-init", "-y"]);
+        expect_stdout_ok(
+            config,
+            &["rustup-init", "-y", "--default-toolchain=stable"],
+            r"stable unchanged - 1.1.0",
+        );
+    });
+}
+
+#[test]
+fn reinstall_specifying_component() {
+    setup(&|config| {
+        expect_ok(config, &["rustup-init", "-y", "--component=rls"]);
+        expect_stdout_ok(
+            config,
+            &["rustup-init", "-y", "--default-toolchain=stable"],
+            r"stable unchanged - 1.1.0",
+        );
+    });
+}
+
+#[test]
+fn reinstall_specifying_different_toolchain() {
+    setup(&|config| {
+        expect_ok(config, &["rustup-init", "-y"]);
+        expect_stderr_ok(
+            config,
+            &["rustup-init", "-y", "--default-toolchain=nightly"],
+            r"info: default toolchain set to 'nightly'",
         );
     });
 }
@@ -1166,7 +1210,7 @@ fn install_but_rustup_sh_is_installed() {
         fs::create_dir_all(&rustup_dir).unwrap();
         let version_file = rustup_dir.join("rustup-version");
         raw::write_file(&version_file, "").unwrap();
-        expect_err(
+        expect_stderr_ok(
             config,
             &["rustup-init", "-y"],
             "cannot install while rustup.sh is installed",

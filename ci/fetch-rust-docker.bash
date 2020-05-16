@@ -10,7 +10,7 @@ set -e
 TARGET="$1"
 
 RUST_REPO="https://github.com/rust-lang/rust"
-S3_BASE_URL="https://rust-lang-ci2.s3.amazonaws.com/rustc-builds"
+ARTIFACTS_BASE_URL="https://ci-artifacts.rust-lang.org/rustc-builds"
 LOCAL_DOCKER_TAG="rust-$TARGET"
 
 # Use images from rustc master
@@ -36,7 +36,7 @@ case "$TARGET" in
 esac
 
 master=$(git ls-remote "$RUST_REPO" refs/heads/master | cut -f1)
-image_url="$S3_BASE_URL/$master/image-$image.txt"
+image_url="$ARTIFACTS_BASE_URL/$master/image-$image.txt"
 info="/tmp/image-$image.txt"
 
 rm -f "$info"
@@ -49,7 +49,7 @@ if [ -z "$(docker images -q "${LOCAL_DOCKER_TAG}")" ]; then
   echo "Attempting to download $url"
   rm -f "$cache"
   set +e
-  travis_retry curl -y 30 -Y 10 --connect-timeout 30 -f -L -C - -o "$cache" "$url"
+  command_retry curl -y 30 -Y 10 --connect-timeout 30 -f -L -C - -o "$cache" "$url"
   set -e
   docker load --quiet -i "$cache"
   docker tag "$digest" "${LOCAL_DOCKER_TAG}"

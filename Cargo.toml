@@ -3,13 +3,12 @@ name = "rustup"
 version = "1.21.1"
 authors = [ "Daniel Silverstone <dsilvers@digital-scurf.org>", "Diggory Blake <diggsey@googlemail.com>" ]
 build = "build.rs"
-documentation = "https://rust-lang.github.io/rustup.rs/rustup/index.html"
 edition = "2018"
-homepage = "https://github.com/rust-lang/rustup.rs"
+homepage = "https://github.com/rust-lang/rustup"
 keywords = ["rustup", "multirust", "install", "proxy"]
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/rust-lang/rustup.rs"
+repository = "https://github.com/rust-lang/rustup"
 description = "Manage multiple rust installations with ease"
 
 [features]
@@ -26,6 +25,7 @@ chrono = "0.4"
 clap = "2"
 download = { path = "download" }
 error-chain = "0.12"
+effective-limits = "0.4"
 flate2 = "1"
 git-testament = "0.1.4"
 home = "0.5"
@@ -35,29 +35,29 @@ opener = "0.4.0"
 # Used by `curl` or `reqwest` backend although it isn't imported
 # by our rustup.
 openssl = { version = "0.10", optional = true }
-pulldown-cmark = { version = "0.6", default-features = false }
+pulldown-cmark = { version = "0.7", default-features = false }
 rand = "0.7"
 regex = "1"
 remove_dir_all = "0.5.1"
 same-file = "1"
 scopeguard = "1"
 semver = "0.9"
+serde = { version = "1.0", features = ["derive"] }
 sha2 = "0.8"
-strsim = "0.9.1"
+strsim = "0.10"
 tar = "0.4.26"
 tempfile = "3.1"
 # FIXME(issue #1788)
 term = "=0.5.1"
 threadpool = "1"
-time = "0.1.34"
 toml = "0.5"
-url = "1"
+url = "2.1"
 wait-timeout = "0.2"
 xz2 = "0.1.3"
-pgp = { version = "0.4", default-features = false}
+pgp = { version = "0.5", default-features = false}
 
 [dependencies.retry]
-version = "0.5"
+version = "1"
 default-features = false
 
 [dependencies.rs_tracing]
@@ -112,3 +112,7 @@ path = "src/cli/main.rs"
 [profile.release]
 lto = true
 codegen-units = 1
+
+# Reduce build time by setting proc-macro crates non optimized.
+[profile.release.build-override]
+opt-level = 0
